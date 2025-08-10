@@ -1,0 +1,90 @@
+import 'dart:io';
+
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:dmms/Core/cache/cached_data.dart';
+import 'package:dmms/Core/notifications/local_notification.dart';
+import 'package:dmms/Core/presentation/widgets/notifications_icon.dart';
+import 'package:dmms/Core/resources/app_strings.dart';
+import 'package:dmms/Features/auth/data/models/authenticated_user.dart';
+import 'package:dmms/Features/main_pages/widgets/normal_user/normal_user_dashboard.dart';
+import 'package:dmms/Features/main_pages/widgets/normal_user/normal_user_drawer.dart';
+import 'package:dmms/Features/notifications/bloc/notifications_bloc.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:easy_localization/easy_localization.dart';
+
+class NormalUserHomePage extends StatefulWidget {
+  final AuthenticatedUser user;
+  static const String routeName = '/NormalUserHomePage';
+  const NormalUserHomePage({super.key, required this.user});
+
+  @override
+  State<NormalUserHomePage> createState() => _NormalUserHomePageState();
+}
+
+class _NormalUserHomePageState extends State<NormalUserHomePage> {
+  late String? fcmToken;
+  late String? deviceId;
+  Future<void> implementFCMToken() async {
+    fcmToken = await LocalNotification.getFCMToken();
+    if (fcmToken != null) {
+      await CachedData.saveData(key: CacheStrings.fcmToken, data: fcmToken);
+    }
+  }
+
+  Future<String?> getDeviceId() async {
+    final deviceInfoPlugin = DeviceInfoPlugin();
+
+    if (Platform.isAndroid) {
+      AndroidDeviceInfo androidInfo = await deviceInfoPlugin.androidInfo;
+      return androidInfo
+          .id; // OR androidInfo.androidId (use androidId if you want the "SSAID")
+    } else if (Platform.isIOS) {
+      IosDeviceInfo iosInfo = await deviceInfoPlugin.iosInfo;
+      return iosInfo.identifierForVendor; // Unique ID for iOS devices
+    } else {
+      return null;
+    }
+  }
+
+  @override
+  void initState() {
+    context.read<NotificationsBloc>().add(NotificationsEvent.getAll());
+
+    implementFCMToken().then((_) {
+      getDeviceId().then((value) {
+        deviceId = value;
+      }).then((_) {
+        if (mounted) {
+          BlocProvider.of<NotificationsBloc>(context)
+              .add(NotificationsEvent.registerFCMToken(data: {
+            "deviceId": deviceId,
+            "fcmToken": fcmToken,
+            "userID": widget.user.id,
+            "platform": "android"
+          }));
+        }
+      });
+    });
+
+    super.initState();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Permission.notification.isDenied.then((value) {
+      if (value) {
+        Permission.notification.request();
+      }
+    });
+    return Scaffold(
+        drawer: NormalUserDrawer(user: widget.user),
+        appBar: AppBar(title: Text(AppStrings.dmms.tr()), actions: [
+          NotificationsIcon(
+            isNotificationEnable: widget.user.isNotificationEnabled,
+          ),
+        ]),
+        body: NormalUserDashboard());
+  }
+}
